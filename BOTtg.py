@@ -92,7 +92,6 @@ GAMES = {
     "bs": ("Brawl Stars", "⭐"),
     "so2": ("Standoff 2", "🧨"),
     "st": ("Steam", "🕹"),
-    "passup": ("Пропуск прокачка", "🌟"),
 }
 # Подписи кнопок игр на Reply-клавиатуре -> ключ игры
 GAME_BUTTONS = {f"{emoji} {title}": key for key, (title, emoji) in GAMES.items()}

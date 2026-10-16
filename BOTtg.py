@@ -1,4 +1,3 @@
-
 """
 Telegram-бот магазина цифровых товаров и игровой валюты (Таджикистан).
 Стек: Python 3.11+, aiogram 3.x, aiosqlite.
@@ -789,6 +788,8 @@ def parse_price(raw: str) -> float | None:
 # ============================================================
 # КЛАВИАТУРЫ И ФИЛЬТРЫ КНОПОК
 # ============================================================
+def main_menu_kb() -> ReplyKeyboardMarkup:
+    """Главное меню: Reply-клавиатура внизу экрана."""
     kb = ReplyKeyboardBuilder()
     kb.button(text=tx("btn_games"))
     kb.button(text=tx("btn_instruction"))

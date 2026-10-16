@@ -1084,8 +1084,8 @@ async def menu_support(message: Message, state: FSMContext):
     await state.clear()
     await send_screen(message, "support", reply_markup=support_kb(), support=esc(SUPPORT_USERNAME))
 
-    def channel_kb(url: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=tx("btn_open_channel"), url=url)]])
+def channel_kb(url: str) -> InlineKeyboardMarkup:
+return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=tx("btn_open_channel"), url=url)]])
 
 
 @router.message(PRIVATE, ButtonText("btn_reviews"))

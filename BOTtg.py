@@ -1,3 +1,4 @@
+
 """
 Telegram-бот магазина цифровых товаров и игровой валюты (Таджикистан).
 Стек: Python 3.11+, aiogram 3.x, aiosqlite.
@@ -53,6 +54,8 @@ CARD_DC = os.getenv("CARD_DC", "не указана")          # Dushanbe City
 CARD_ALIF = os.getenv("CARD_ALIF", "не указана")      # Alif
 CARD_HOLDER = os.getenv("CARD_HOLDER", "")            # Имя получателя
 SUPPORT_USERNAME = os.getenv("SUPPORT_USERNAME", "@support")
+REVIEWS_URL = os.getenv("REVIEWS_URL", "")
+NEWS_URL = os.getenv("NEWS_URL", "")
 DB_PATH = os.getenv("DB_PATH", "shop.db")
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -331,6 +334,11 @@ DEFAULTS: list[tuple[str, str, str]] = [
      "❌ Ваш заказ №{order_id} отклонён.\n\n<b>Причина:</b> {reason}\n\nЕсли это ошибка, напишите в поддержку: {support}"),
     ("maintenance", "Техработы (команда /maintenance)", "🛠 Идут технические работы. Попробуйте позже!"),
     ("banned", "Подстановки: {support}", "🚫 Доступ ограничен. Свяжитесь с поддержкой: {support}"),
+    ("btn_reviews", "", "⭐ Отзывы"),
+    ("btn_news", "", "📢 Новости"),
+    ("btn_open_channel", "Кнопка-ссылка под сообщением", "Открыть канал ↗️"),
+    ("reviews", "", "⭐ <b>Отзывы наших клиентов</b>\n\nПосмотрите, что о нас пишут, и оставьте свой отзыв в канале:"),
+    ("news", "", "📢 <b>Новости и акции</b>\n\nПодпишитесь, чтобы не пропускать скидки и обновления:"),
 ]
 
 DEFAULT_TEXTS = {k: t for k, _, t in DEFAULTS}
@@ -781,16 +789,17 @@ def parse_price(raw: str) -> float | None:
 # ============================================================
 # КЛАВИАТУРЫ И ФИЛЬТРЫ КНОПОК
 # ============================================================
-def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню: Reply-клавиатура внизу экрана."""
     kb = ReplyKeyboardBuilder()
     kb.button(text=tx("btn_games"))
     kb.button(text=tx("btn_instruction"))
     kb.button(text=tx("btn_support"))
     kb.button(text=tx("btn_orders"))
-    kb.adjust(1, 2, 1)
+    if REVIEWS_URL:
+        kb.button(text=tx("btn_reviews"))
+    if NEWS_URL:
+        kb.button(text=tx("btn_news"))
+    kb.adjust(1, 2, 1, 2)
     return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_menu"))
-
 
 def games_kb() -> ReplyKeyboardMarkup:
     """Выбор игры: Reply-клавиатура, плюс кнопка возврата в главное меню."""
@@ -1074,6 +1083,23 @@ async def menu_instruction(message: Message, state: FSMContext):
 async def menu_support(message: Message, state: FSMContext):
     await state.clear()
     await send_screen(message, "support", reply_markup=support_kb(), support=esc(SUPPORT_USERNAME))
+
+    def channel_kb(url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=tx("btn_open_channel"), url=url)]])
+
+
+@router.message(PRIVATE, ButtonText("btn_reviews"))
+async def menu_reviews(message: Message, state: FSMContext):
+    await state.clear()
+    if REVIEWS_URL:
+        await send_screen(message, "reviews", reply_markup=channel_kb(REVIEWS_URL))
+
+
+@router.message(PRIVATE, ButtonText("btn_news"))
+async def menu_news(message: Message, state: FSMContext):
+    await state.clear()
+    if NEWS_URL:
+        await send_screen(message, "news", reply_markup=channel_kb(NEWS_URL))
 
 
 @router.message(PRIVATE, ButtonText("btn_orders"))

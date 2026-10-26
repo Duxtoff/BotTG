@@ -98,6 +98,8 @@ GAMES: dict[str, tuple[str, str]] = {
     "st": ("Steam", "🕹"),
 }
 GAME_ACTIVE: dict[str, int] = {k: 1 for k in GAMES}
+GAME_IS_OTHER: dict[str, int] = {k: 0 for k in GAMES}
+BOT_USERNAME: str = ""
 # Подписи кнопок игр на Reply-клавиатуре -> ключ игры
 GAME_BUTTONS: dict[str, str] = {f"{emoji} {title}": key for key, (title, emoji) in GAMES.items()}
 
@@ -229,6 +231,9 @@ FILE_HEADER = """\
 DEFAULTS: list[tuple[str, str, str]] = [
     # ---- Кнопки (подписи) ----
     ("btn_games", "Подписи кнопок. Новые подписи появятся у пользователей при следующем показе меню.", "🎮 Пополнить / Игры"),
+    ("btn_other_games", "Кнопка «Другие игры»", "✨ Другие игры"),
+    ("btn_back_to_games", "Кнопка возврата к списку главных игр", "◀️ К играм"),
+    ("btn_referrals", "Кнопка «Рефералы» в главном меню", "👥 Рефералы"),
     ("btn_instruction", "", "📖 Инструкция"),
     ("btn_support", "", "💬 Поддержка"),
     ("btn_orders", "", "📦 Мои заказы"),
@@ -247,6 +252,7 @@ DEFAULTS: list[tuple[str, str, str]] = [
      "Здесь можно быстро пополнить <b>PUBG Mobile, Free Fire, Roblox и Brawl Stars</b> "
      "с оплатой переводом на карту в сомони.\n\nВыберите действие в меню ниже 👇"),
     ("home", "", "🏠 Главное меню"),
+    ("other_games_menu", "Раздел других игр", "✨ <b>Другие игры</b>\n\nВыберите игру из дополнительного каталога:"),
     ("games_menu", "", "🎮 Выберите игру на клавиатуре ниже 👇"),
     ("cancelled_action", "После команды /cancel", "Действие отменено."),
     ("instruction", "", "📖 <b>Как сделать заказ</b>\n\n"
@@ -590,14 +596,30 @@ async def init_db() -> None:
             title      TEXT NOT NULL,
             emoji      TEXT NOT NULL DEFAULT '🎮',
             sort_order INTEGER NOT NULL DEFAULT 0,
-            active     INTEGER NOT NULL DEFAULT 1
+            active     INTEGER NOT NULL DEFAULT 1,
+            is_other   INTEGER NOT NULL DEFAULT 0
         );
         CREATE TABLE IF NOT EXISTS users (
-            user_id    INTEGER PRIMARY KEY,
-            username   TEXT,
-            full_name  TEXT,
-            created_at TEXT,
-            banned     INTEGER NOT NULL DEFAULT 0
+            user_id     INTEGER PRIMARY KEY,
+            username    TEXT,
+            full_name   TEXT,
+            created_at  TEXT,
+            banned      INTEGER NOT NULL DEFAULT 0,
+            referrer_id INTEGER
+        );
+        CREATE TABLE IF NOT EXISTS referrals (
+            referrer_id INTEGER NOT NULL,
+            referee_id  INTEGER NOT NULL PRIMARY KEY,
+            created_at  TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS referral_rewards (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id       INTEGER NOT NULL,
+            promo_code    TEXT NOT NULL,
+            milestone     INTEGER NOT NULL,
+            discount_type TEXT NOT NULL,
+            discount_val  REAL NOT NULL,
+            created_at    TEXT NOT NULL
         );
         CREATE TABLE IF NOT EXISTS subcategories (
             game_key   TEXT NOT NULL,
@@ -636,12 +658,13 @@ async def init_db() -> None:
             value TEXT
         );
         CREATE TABLE IF NOT EXISTS promocodes (
-            code         TEXT PRIMARY KEY,
-            discount_tjs REAL NOT NULL,
-            quantity     INTEGER NOT NULL,
-            used         INTEGER NOT NULL DEFAULT 0,
-            active       INTEGER NOT NULL DEFAULT 1,
-            created_at   TEXT
+            code          TEXT PRIMARY KEY,
+            discount_tjs  REAL NOT NULL,
+            quantity      INTEGER NOT NULL,
+            used          INTEGER NOT NULL DEFAULT 0,
+            active        INTEGER NOT NULL DEFAULT 1,
+            created_at    TEXT,
+            discount_type TEXT NOT NULL DEFAULT 'fixed'
         );
         CREATE TABLE IF NOT EXISTS promo_uses (
             code    TEXT NOT NULL,
@@ -659,6 +682,12 @@ async def init_db() -> None:
         await db.execute("ALTER TABLE orders ADD COLUMN discount_tjs REAL NOT NULL DEFAULT 0")
     if not await _has_column("products", "subcategory_key"):
         await db.execute("ALTER TABLE products ADD COLUMN subcategory_key TEXT")
+    if not await _has_column("games", "is_other"):
+        await db.execute("ALTER TABLE games ADD COLUMN is_other INTEGER NOT NULL DEFAULT 0")
+    if not await _has_column("users", "referrer_id"):
+        await db.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
+    if not await _has_column("promocodes", "discount_type"):
+        await db.execute("ALTER TABLE promocodes ADD COLUMN discount_type TEXT NOT NULL DEFAULT 'fixed'")
 
     # Подкатегории: при первом запуске создаём стандартные
     async with db.execute("SELECT COUNT(*) FROM subcategories") as cur:
@@ -705,29 +734,42 @@ async def init_db() -> None:
 
 
 async def load_games() -> None:
-    """Загружает список категорий игр из БД в память (GAMES, GAME_BUTTONS, GAME_ACTIVE)."""
-    global GAMES, GAME_BUTTONS, GAME_ACTIVE
-    async with db.execute("SELECT game_key, title, emoji, active FROM games ORDER BY sort_order, title") as cur:
+    """Загружает список категорий игр из БД в память (GAMES, GAME_BUTTONS, GAME_ACTIVE, GAME_IS_OTHER)."""
+    global GAMES, GAME_BUTTONS, GAME_ACTIVE, GAME_IS_OTHER
+    async with db.execute("SELECT game_key, title, emoji, active, COALESCE(is_other, 0) FROM games ORDER BY sort_order, title") as cur:
         rows = await cur.fetchall()
     if rows:
         GAMES.clear()
         GAME_ACTIVE.clear()
-        for key, title, emoji, active in rows:
+        GAME_IS_OTHER.clear()
+        for key, title, emoji, active, is_other in rows:
             GAMES[key] = (title, emoji)
             GAME_ACTIVE[key] = active
+            GAME_IS_OTHER[key] = is_other
         GAME_BUTTONS.clear()
         for key, (title, emoji) in GAMES.items():
             GAME_BUTTONS[f"{emoji} {title}"] = key
 
 
-async def upsert_user(message_or_cb) -> None:
+async def upsert_user(message_or_cb, referrer_id: int | None = None) -> bool:
+    """Создает/обновляет пользователя. Возвращает True, если пользователь зарегистрирован впервые."""
     u = message_or_cb.from_user
-    await db.execute(
-        """INSERT INTO users (user_id, username, full_name, created_at) VALUES (?, ?, ?, ?)
-           ON CONFLICT(user_id) DO UPDATE SET username=excluded.username, full_name=excluded.full_name""",
-        (u.id, u.username, u.full_name, now_iso()),
-    )
+    is_new = False
+    async with db.execute("SELECT user_id FROM users WHERE user_id=?", (u.id,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        is_new = True
+        await db.execute(
+            """INSERT INTO users (user_id, username, full_name, created_at, referrer_id) VALUES (?, ?, ?, ?, ?)""",
+            (u.id, u.username, u.full_name, now_iso(), referrer_id),
+        )
+    else:
+        await db.execute(
+            """UPDATE users SET username=?, full_name=? WHERE user_id=?""",
+            (u.username, u.full_name, u.id),
+        )
     await db.commit()
+    return is_new
 
 
 async def get_subcats(game_key: str):
@@ -851,25 +893,52 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
     kb.button(text=tx("btn_instruction"))
     kb.button(text=tx("btn_support"))
     kb.button(text=tx("btn_orders"))
+    kb.button(text=tx("btn_referrals"))
     if REVIEWS_URL:
         kb.button(text=tx("btn_reviews"))
     if NEWS_URL:
         kb.button(text=tx("btn_news"))
-    kb.adjust(1, 2, 1, 2)
+    extra = (1 if REVIEWS_URL else 0) + (1 if NEWS_URL else 0)
+    adjust_args = [1, 2, 2]
+    if extra == 2:
+        adjust_args.append(2)
+    elif extra == 1:
+        adjust_args.append(1)
+    kb.adjust(*adjust_args)
     return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_menu"))
 
 def games_kb() -> ReplyKeyboardMarkup:
-    """Выбор игры: Reply-клавиатура, плюс кнопка возврата в главное меню."""
+    """Выбор игры: Reply-клавиатура главных игр + кнопка «Другие игры» (если есть) + «Главное меню»."""
     kb = ReplyKeyboardBuilder()
     count = 0
     for text, key in GAME_BUTTONS.items():
-        if GAME_ACTIVE.get(key, 1):
+        if GAME_ACTIVE.get(key, 1) and not GAME_IS_OTHER.get(key, 0):
             kb.button(text=text)
             count += 1
+
+    has_other = any(GAME_ACTIVE.get(k, 1) and GAME_IS_OTHER.get(k, 0) for k in GAMES)
+    if has_other:
+        kb.button(text=tx("btn_other_games"))
+        count += 1
+
     kb.button(text=tx("btn_home"))
-    # Раскладка кнопок: по 2 в ряд, последняя - главное меню
     n = count
     kb.adjust(*([2] * (n // 2) + ([1] if n % 2 else []) + [1]))
+    return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_games"))
+
+
+def other_games_kb() -> ReplyKeyboardMarkup:
+    """Выбор игры из раздела «Другие игры» + кнопки возврата."""
+    kb = ReplyKeyboardBuilder()
+    count = 0
+    for text, key in GAME_BUTTONS.items():
+        if GAME_ACTIVE.get(key, 1) and GAME_IS_OTHER.get(key, 0):
+            kb.button(text=text)
+            count += 1
+    kb.button(text=tx("btn_back_to_games"))
+    kb.button(text=tx("btn_home"))
+    n = count
+    kb.adjust(*([2] * (n // 2) + ([1] if n % 2 else []) + [2]))
     return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_games"))
 
 
@@ -1087,15 +1156,156 @@ async def show_products(message: Message, state: FSMContext, game_key: str, subc
                       game=esc(title), emoji=emoji, subcat=esc(await get_subcat_title(game_key, subcat_key)))
 
 
+
+# ============================================================
+# РЕФЕРАЛЬНАЯ СИСТЕМА
+# ============================================================
+async def get_ref_settings():
+    """Возвращает: (enabled, threshold, reward_type, reward_value)"""
+    enabled = (await get_setting("ref_enabled", "1")) == "1"
+    threshold = max(int(await get_setting("ref_threshold", "5")), 1)
+    reward_type = await get_setting("ref_reward_type", "fixed")  # 'fixed' или 'percent'
+    reward_value = float(await get_setting("ref_reward_value", "15"))
+    return enabled, threshold, reward_type, reward_value
+
+
+async def process_referral(bot: Bot, referee_id: int, referee_name: str, referrer_id: int) -> None:
+    """Учитывает реферала и выдает промокод, если достигнут порог."""
+    if referrer_id == referee_id:
+        return
+
+    # Записываем в таблицу referrals (PRIMARY KEY на referee_id предотвратит повторы)
+    try:
+        await db.execute(
+            """INSERT INTO referrals (referrer_id, referee_id, created_at) VALUES (?, ?, ?)""",
+            (referrer_id, referee_id, now_iso()),
+        )
+        await db.commit()
+    except sqlite3.IntegrityError:
+        return
+
+    enabled, threshold, reward_type, reward_value = await get_ref_settings()
+
+    # Считаем количество рефералов
+    async with db.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=?", (referrer_id,)) as cur:
+        (total_refs,) = await cur.fetchone()
+
+    # Уведомляем пригласившего
+    try:
+        await bot.send_message(
+            referrer_id,
+            f"👤 <b>Новый реферал!</b>\n"
+            f"По вашей ссылке зарегистрировался <b>{esc(referee_name)}</b>.\n"
+            f"Всего приглашено: <b>{total_refs}</b> чел."
+        )
+    except Exception:
+        pass
+
+    if not enabled:
+        return
+
+    # Проверяем, положена ли награда
+    async with db.execute("SELECT COUNT(*) FROM referral_rewards WHERE user_id=?", (referrer_id,)) as cur:
+        (rewards_count,) = await cur.fetchone()
+
+    milestones_earned = total_refs // threshold
+    if milestones_earned > rewards_count:
+        # Генерируем уникальный промокод
+        import secrets
+        code = f"REF{referrer_id}_{secrets.token_hex(2).upper()}"
+        try:
+            await db.execute(
+                """INSERT INTO promocodes (code, discount_tjs, quantity, used, active, created_at, discount_type)
+                   VALUES (?, ?, 1, 0, 1, ?, ?)""",
+                (code, reward_value, now_iso(), reward_type),
+            )
+            await db.execute(
+                """INSERT INTO referral_rewards (user_id, promo_code, milestone, discount_type, discount_val, created_at)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (referrer_id, code, milestones_earned * threshold, reward_type, reward_value, now_iso()),
+            )
+            await db.commit()
+
+            reward_str = f"<b>{reward_value:g}%</b>" if reward_type == "percent" else f"<b>{fmt_price(reward_value)} TJS</b>"
+            await bot.send_message(
+                referrer_id,
+                f"🎉 <b>Поздравляем! Вы пригласили {milestones_earned * threshold} друзей!</b>\n\n"
+                f"Вам начислен персональный промокод на скидку {reward_str}:\n"
+                f"🎟 <code>{code}</code>\n\n"
+                f"Используйте его при оформлении любого заказа доната!"
+            )
+        except Exception as e:
+            log.warning("Ошибка начисления реферальной награды: %s", e)
+
+
+async def show_referrals_screen(message: Message) -> None:
+    """Показывает меню реферальной системы."""
+    user_id = message.from_user.id
+    enabled, threshold, reward_type, reward_value = await get_ref_settings()
+
+    async with db.execute("SELECT COUNT(*) FROM referrals WHERE referrer_id=?", (user_id,)) as cur:
+        (invited,) = await cur.fetchone()
+
+    async with db.execute(
+        """SELECT promo_code, discount_type, discount_val FROM referral_rewards
+           WHERE user_id=? ORDER BY id DESC LIMIT 5""",
+        (user_id,)
+    ) as cur:
+        rewards = await cur.fetchall()
+
+    rewards_count = len(rewards)
+    remains = threshold - (invited % threshold)
+    if remains == 0 and invited > 0:
+        remains = threshold
+
+    reward_desc = f"{reward_value:g}% скидки" if reward_type == "percent" else f"{fmt_price(reward_value)} TJS"
+
+    link = f"https://t.me/{BOT_USERNAME}?start=ref{user_id}" if BOT_USERNAME else f"https://t.me/bot?start=ref{user_id}"
+
+    reward_history = ""
+    if rewards:
+        reward_history = "\n\n<b>Ваши полученные промокоды:</b>\n"
+        for pcode, ptype, pval in rewards:
+            pval_str = f"{pval:g}%" if ptype == "percent" else f"{fmt_price(pval)} TJS"
+            reward_history += f"• <code>{pcode}</code> (скидка {pval_str})\n"
+
+    status_note = "" if enabled else "\n⚠️ <i>Реферальная программа временно приостановлена администратором.</i>\n"
+
+    text = (
+        f"👥 <b>Реферальная программа</b>\n\n"
+        f"Приглашайте друзей в бота и получайте скидочные промокоды на донат!\n\n"
+        f"🎁 <b>Награда:</b> промокод на <b>{reward_desc}</b> за каждые <b>{threshold}</b> приглашённых друзей.\n\n"
+        f"📊 <b>Ваша статистика:</b>\n"
+        f"• Всего приглашено: <b>{invited}</b> чел.\n"
+        f"• До следующего промокода: <b>{remains}</b> чел.\n"
+        f"• Получено промокодов: <b>{rewards_count}</b>"
+        f"{reward_history}"
+        f"{status_note}\n"
+        f"🔗 <b>Ваша ссылка для приглашения:</b>\n"
+        f"<code>{link}</code>\n\n"
+        f"<i>Нажмите на ссылку выше, чтобы скопировать её и отправить друзьям!</i>"
+    )
+    await message.answer(text, reply_markup=main_menu_kb())
+
 # ============================================================
 # ХЕНДЛЕРЫ ПОЛЬЗОВАТЕЛЯ
 # Порядок важен: кнопки меню регистрируются РАНЬШЕ обработчиков состояний,
 # поэтому нажатие любой кнопки меню работает даже посреди заказа и отменяет текущий шаг.
 # ============================================================
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext):
+async def cmd_start(message: Message, state: FSMContext, command: CommandObject):
     await state.clear()
-    await upsert_user(message)
+    ref_id: int | None = None
+    args = (command.args or "").strip()
+    if args:
+        clean = args.replace("ref", "")
+        if clean.isdigit():
+            ref_id = int(clean)
+
+    is_new = await upsert_user(message, referrer_id=ref_id)
+    if is_new and ref_id and ref_id != message.from_user.id:
+        await process_referral(message.bot, message.from_user.id, message.from_user.full_name, ref_id)
+
     await send_screen(message, "welcome", reply_markup=kb_for(message))
 
 
@@ -1114,10 +1324,26 @@ async def menu_home(message: Message, state: FSMContext):
 # «Назад» на клавиатуре подкатегорий возвращает к списку игр
 @router.message(PRIVATE, ButtonText("btn_back"))
 @router.message(PRIVATE, ButtonText("btn_games"))
+@router.message(PRIVATE, ButtonText("btn_back_to_games"))
 async def menu_games(message: Message, state: FSMContext):
     await state.clear()
     await upsert_user(message)
     await send_screen(message, "games_menu", reply_markup=games_kb())
+
+
+@router.message(PRIVATE, ButtonText("btn_other_games"))
+async def menu_other_games(message: Message, state: FSMContext):
+    await state.clear()
+    await upsert_user(message)
+    await send_screen(message, "other_games_menu", reply_markup=other_games_kb())
+
+
+@router.message(PRIVATE, ButtonText("btn_referrals"))
+@router.message(Command("ref", "referrals"))
+async def menu_referrals(message: Message, state: FSMContext):
+    await state.clear()
+    await upsert_user(message)
+    await show_referrals_screen(message)
 
 
 @router.message(PRIVATE, GameButton())
@@ -1473,7 +1699,19 @@ async def msg_promo(message: Message, state: FSMContext, bot: Bot):
         return
 
     price = order[5]
-    new_price = round(max(price - promo[0], 1.0), 2)   # минимальная цена заказа — 1 TJS
+    discount_val = promo[0]
+    disc_type = "fixed"
+    async with db.execute("SELECT discount_type FROM promocodes WHERE code=?", (code,)) as c_type:
+        row_t = await c_type.fetchone()
+        if row_t and row_t[0]:
+            disc_type = row_t[0]
+
+    if disc_type == "percent":
+        calc_discount = round(price * (discount_val / 100.0), 2)
+    else:
+        calc_discount = discount_val
+
+    new_price = round(max(price - calc_discount, 1.0), 2)   # минимальная цена заказа — 1 TJS
     real_discount = round(price - new_price, 2)
     cur = await db.execute(
         "UPDATE orders SET price_tjs=?, promo_code=?, discount_tjs=?, updated_at=? "
@@ -1741,9 +1979,10 @@ async def adm_categories(message: Message):
     lines = ["<b>Категории игр (каталог доната):</b>\n"]
     for game_key, title, emoji, active, sub_cnt, prod_cnt in rows:
         status = "🟢" if active else "⚫"
+        section = "✨ Другие игры" if GAME_IS_OTHER.get(game_key, 0) else "Главные игры"
         has_img = " 🖼" if find_image([game_key]) else ""
         lines.append(
-            f"{status} {emoji} <b>{esc(title)}</b> (<code>{esc(game_key)}</code>){has_img}\n"
+            f"{status} {emoji} <b>{esc(title)}</b> (<code>{esc(game_key)}</code>) [{section}]{has_img}\n"
             f"   └ Подкатегорий: {sub_cnt} | Активных товаров: {prod_cnt}"
         )
 
@@ -1773,6 +2012,50 @@ async def adm_togglecategory(message: Message, command: CommandObject):
     await load_games()
     state_str = "🟢 показана пользователям" if new_active else "⚫ скрыта из меню"
     await message.answer(f"Категория «{esc(row[0])}» теперь {state_str}.")
+
+
+@admin_router.message(Command("setother", "toggleother", "othergame"))
+async def adm_setother(message: Message, command: CommandObject):
+    parts = (command.args or "").strip().lower().split()
+    if not parts:
+        await message.answer(
+            "Формат: /setother КЛЮЧ [on|off]\n\n"
+            "Примеры:\n"
+            "• <code>/setother mlbb</code> — переключить между главным меню и вкладкой «✨ Другие игры»\n"
+            "• <code>/setother mlbb on</code> — показывать только во вкладке «✨ Другие игры»\n"
+            "• <code>/setother mlbb off</code> — вернуть в главные игры\n\n"
+            "Список категорий: /categories"
+        )
+        return
+
+    key = parts[0]
+    async with db.execute("SELECT title, is_other FROM games WHERE game_key=?", (key,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        await message.answer(f"⚠️ Категория «{esc(key)}» не найдена. Список: /categories")
+        return
+
+    title, current_is_other = row[0], row[1]
+    if len(parts) >= 2:
+        val = parts[1]
+        new_is_other = 1 if val in ("on", "1", "true", "да", "other", "другие") else 0
+    else:
+        new_is_other = 0 if current_is_other else 1
+
+    await db.execute("UPDATE games SET is_other=? WHERE game_key=?", (new_is_other, key))
+    await db.commit()
+    await load_games()
+
+    if new_is_other:
+        await message.answer(
+            f"✨ Категория <b>«{esc(title)}»</b> (<code>{key}</code>) теперь отображается "
+            f"<b>только во вкладке «✨ Другие игры»</b>."
+        )
+    else:
+        await message.answer(
+            f"🎮 Категория <b>«{esc(title)}»</b> (<code>{key}</code>) возвращена "
+            f"<b>в список главных игр</b>."
+        )
 
 
 @admin_router.message(Command("delcategory", "delgame"))
@@ -2333,6 +2616,95 @@ async def adm_maintenance(message: Message):
         await message.answer("✅ Технические работы <b>ВЫКЛЮЧЕНЫ</b>. Бот работает в обычном режиме.")
 
 
+# ---------- Реферальная система ----------
+@admin_router.message(Command("refsettings", "refinfo"))
+async def adm_refsettings(message: Message):
+    enabled, threshold, reward_type, reward_value = await get_ref_settings()
+    async with db.execute("SELECT COUNT(*) FROM referrals") as cur:
+        (total_refs,) = await cur.fetchone()
+    async with db.execute("SELECT COUNT(*) FROM referral_rewards") as cur:
+        (total_rewards,) = await cur.fetchone()
+
+    status_str = "🟢 Включена" if enabled else "⚫ Выключена"
+    reward_str = f"<b>{reward_value:g}%</b> (процент от суммы)" if reward_type == "percent" else f"<b>{fmt_price(reward_value)} TJS</b> (фиксированная сумма)"
+
+    text = (
+        f"👥 <b>Настройки реферальной программы:</b>\n\n"
+        f"• Статус: {status_str}\n"
+        f"• Порог друзей: <b>{threshold} чел.</b> за 1 промокод\n"
+        f"• Награда: {reward_str}\n\n"
+        f"📊 <b>Статистика:</b>\n"
+        f"• Всего зарегистрировано рефералов: <b>{total_refs}</b>\n"
+        f"• Всего выдано наград: <b>{total_rewards}</b>\n\n"
+        f"<b>Команды управления:</b>\n"
+        f"• <code>/setref 5 fixed 20</code> — 20 TJS за каждые 5 чел.\n"
+        f"• <code>/setref 10 percent 15</code> — 15% скидки за каждые 10 чел.\n"
+        f"• <code>/toggleref</code> — включить / выключить программу"
+    )
+    await message.answer(text)
+
+
+@admin_router.message(Command("setref"))
+async def adm_setref(message: Message, command: CommandObject):
+    parts = (command.args or "").strip().split()
+    if len(parts) < 2:
+        await message.answer(
+            "Формат: /setref ПОРОГ [fixed|percent] ЗНАЧЕНИЕ\n\n"
+            "Примеры:\n"
+            "• <code>/setref 5 fixed 20</code> — за каждые 5 приглашенных промокод на 20 TJS\n"
+            "• <code>/setref 10 percent 15</code> — за каждые 10 приглашенных промокод на 15%\n"
+            "• <code>/setref 3 15</code> — по умолчанию фиксированная сумма 15 TJS за 3 чел."
+        )
+        return
+
+    try:
+        threshold = int(parts[0])
+        if threshold <= 0 or threshold > 1000:
+            raise ValueError()
+    except ValueError:
+        await message.answer("⚠️ Порог должен быть целым числом больше нуля (например, 5).")
+        return
+
+    if len(parts) >= 3:
+        raw_type = parts[1].lower()
+        if raw_type in ("percent", "%", "процент"):
+            reward_type = "percent"
+        else:
+            reward_type = "fixed"
+        raw_val = parts[2]
+    else:
+        reward_type = "fixed"
+        raw_val = parts[1]
+
+    val = parse_price(raw_val)
+    if val is None or val <= 0:
+        await message.answer("⚠️ Некорректная сумма/процент скидки.")
+        return
+
+    if reward_type == "percent" and val > 100:
+        await message.answer("⚠️ Процент скидки не может быть больше 100%.")
+        return
+
+    await set_setting("ref_threshold", str(threshold))
+    await set_setting("ref_reward_type", reward_type)
+    await set_setting("ref_reward_value", str(val))
+
+    desc = f"скидка <b>{val:g}%</b>" if reward_type == "percent" else f"скидка <b>{fmt_price(val)} TJS</b>"
+    await message.answer(
+        f"✅ Настройки реферальной системы обновлены!\n"
+        f"Порог: за каждые <b>{threshold}</b> приглашённых выдаётся {desc}."
+    )
+
+
+@admin_router.message(Command("toggleref"))
+async def adm_toggleref(message: Message):
+    current = await get_setting("ref_enabled", "1") == "1"
+    new_val = "0" if current else "1"
+    await set_setting("ref_enabled", new_val)
+    state_str = "🟢 включена" if new_val == "1" else "⚫ выключена"
+    await message.answer(f"Реферальная программа теперь {state_str}.")
+
+
 # ---------- Промокоды ----------
 @admin_router.message(Command("promocode"))
 async def adm_promocode(message: Message, command: CommandObject):
@@ -2485,6 +2857,10 @@ async def setup_bot_commands(bot: Bot) -> None:
                 BotCommand(command="categories", description="Список категорий игр"),
                 BotCommand(command="addcategory", description="Добавить категорию: ключ [эмодзи] название"),
                 BotCommand(command="togglecategory", description="Скрыть/показать категорию игры: ключ"),
+                BotCommand(command="setother", description="Перенести в «Другие игры»: ключ [on|off]"),
+                BotCommand(command="refsettings", description="Настройки реферальной системы"),
+                BotCommand(command="setref", description="Настроить рефералку: порог тип сумма"),
+                BotCommand(command="toggleref", description="Вкл/выкл реферальную систему"),
                 BotCommand(command="products", description="Список товаров и их ID"),
                 BotCommand(command="subcats", description="Список подкатегорий"),
                 BotCommand(command="addsubcat", description="Добавить подкатегорию: игра ключ название"),
@@ -2527,6 +2903,13 @@ async def main() -> None:
     await init_db()
 
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
+    global BOT_USERNAME
+    try:
+        me = await bot.get_me()
+        BOT_USERNAME = me.username or ""
+    except Exception as e:
+        log.warning("Не удалось получить username бота: %s", e)
+
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
 

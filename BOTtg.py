@@ -86,8 +86,10 @@ router.include_router(admin_router)
 db: aiosqlite.Connection  # глобальное подключение, открывается в main()
 
 # Главные категории (игры): ключ -> (название, эмодзи).
+# Синхронизируются с таблицей games в БД; при добавлении новой категории через /addcategory
+# обновляются в памяти автоматически.
 # Картинка-обложка игры: images/<ключ>.jpg  (например images/ff.jpg)
-GAMES = {
+GAMES: dict[str, tuple[str, str]] = {
     "pubg": ("PUBG Mobile", "🔫"),
     "ff": ("Free Fire", "🔥"),
     "roblox": ("Roblox", "🧱"),
@@ -95,8 +97,19 @@ GAMES = {
     "so2": ("Standoff 2", "🧨"),
     "st": ("Steam", "🕹"),
 }
+GAME_ACTIVE: dict[str, int] = {k: 1 for k in GAMES}
 # Подписи кнопок игр на Reply-клавиатуре -> ключ игры
-GAME_BUTTONS = {f"{emoji} {title}": key for key, (title, emoji) in GAMES.items()}
+GAME_BUTTONS: dict[str, str] = {f"{emoji} {title}": key for key, (title, emoji) in GAMES.items()}
+
+# Начальные игры для базы данных
+SEED_GAMES = [
+    ("pubg", "PUBG Mobile", "🔫", 1),
+    ("ff", "Free Fire", "🔥", 2),
+    ("roblox", "Roblox", "🧱", 3),
+    ("bs", "Brawl Stars", "⭐", 4),
+    ("so2", "Standoff 2", "🧨", 5),
+    ("st", "Steam", "🕹", 6),
+]
 
 # Reply-клавиатура есть только в личных чатах
 PRIVATE = F.chat.type == "private"
@@ -572,6 +585,13 @@ async def init_db() -> None:
     """Создаёт таблицы, дополняет старую базу новыми колонками/подкатегориями и заполняет каталог, если он пуст."""
     await db.executescript(
         """
+        CREATE TABLE IF NOT EXISTS games (
+            game_key   TEXT PRIMARY KEY,
+            title      TEXT NOT NULL,
+            emoji      TEXT NOT NULL DEFAULT '🎮',
+            sort_order INTEGER NOT NULL DEFAULT 0,
+            active     INTEGER NOT NULL DEFAULT 1
+        );
         CREATE TABLE IF NOT EXISTS users (
             user_id    INTEGER PRIMARY KEY,
             username   TEXT,
@@ -661,7 +681,43 @@ async def init_db() -> None:
         await db.executemany(
             "INSERT INTO products (game_key, subcategory_key, title, price_tjs) VALUES (?, ?, ?, ?)", SEED_PRODUCTS
         )
+
+    # Категории игр: при первом запуске создаём начальные игры в таблице games
+    async with db.execute("SELECT COUNT(*) FROM games") as cur:
+        (games_count,) = await cur.fetchone()
+    if games_count == 0:
+        await db.executemany(
+            "INSERT INTO games (game_key, title, emoji, sort_order, active) VALUES (?, ?, ?, ?, 1)",
+            SEED_GAMES,
+        )
+
+    # Для баз данных, где уже были товары/подкатегории, переносим неизвестные ключи в games
+    async with db.execute("SELECT DISTINCT game_key FROM subcategories UNION SELECT DISTINCT game_key FROM products") as cur:
+        existing_keys = [r[0] for r in await cur.fetchall()]
+    for k in existing_keys:
+        if k and k not in GAMES:
+            await db.execute(
+                "INSERT OR IGNORE INTO games (game_key, title, emoji, sort_order, active) VALUES (?, ?, ?, 99, 1)",
+                (k, k.capitalize(), "🎮"),
+            )
     await db.commit()
+    await load_games()
+
+
+async def load_games() -> None:
+    """Загружает список категорий игр из БД в память (GAMES, GAME_BUTTONS, GAME_ACTIVE)."""
+    global GAMES, GAME_BUTTONS, GAME_ACTIVE
+    async with db.execute("SELECT game_key, title, emoji, active FROM games ORDER BY sort_order, title") as cur:
+        rows = await cur.fetchall()
+    if rows:
+        GAMES.clear()
+        GAME_ACTIVE.clear()
+        for key, title, emoji, active in rows:
+            GAMES[key] = (title, emoji)
+            GAME_ACTIVE[key] = active
+        GAME_BUTTONS.clear()
+        for key, (title, emoji) in GAMES.items():
+            GAME_BUTTONS[f"{emoji} {title}"] = key
 
 
 async def upsert_user(message_or_cb) -> None:
@@ -805,10 +861,15 @@ def main_menu_kb() -> ReplyKeyboardMarkup:
 def games_kb() -> ReplyKeyboardMarkup:
     """Выбор игры: Reply-клавиатура, плюс кнопка возврата в главное меню."""
     kb = ReplyKeyboardBuilder()
-    for text in GAME_BUTTONS:
-        kb.button(text=text)
+    count = 0
+    for text, key in GAME_BUTTONS.items():
+        if GAME_ACTIVE.get(key, 1):
+            kb.button(text=text)
+            count += 1
     kb.button(text=tx("btn_home"))
-    kb.adjust(3, 3, 1)
+    # Раскладка кнопок: по 2 в ряд, последняя - главное меню
+    n = count
+    kb.adjust(*([2] * (n // 2) + ([1] if n % 2 else []) + [1]))
     return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_games"))
 
 
@@ -1590,6 +1651,159 @@ async def answer_chunked(message: Message, lines: list[str], footer: str = "") -
         await message.answer(chunk + footer)
 
 
+# ---------- Категории игр ----------
+@admin_router.message(Command("addcategory", "addgame"))
+async def adm_addcategory(message: Message, command: CommandObject):
+    parts = (command.args or "").split()
+    if len(parts) < 2:
+        await message.answer(
+            "Формат: /addcategory КЛЮЧ [ЭМОДЗИ] Название\n\n"
+            "Примеры:\n"
+            "• <code>/addcategory mlbb ⚔️ Mobile Legends</code>\n"
+            "• <code>/addcategory genshin 🌟 Genshin Impact</code>\n"
+            "• <code>/addcategory coc Clash of Clans</code> (без эмодзи, будет 🎮)\n\n"
+            "КЛЮЧ — только латиница, цифры и _ (2–20 символов).\n"
+            "Список всех категорий: /categories"
+        )
+        return
+
+    game_key = parts[0].lower()
+    if not re.fullmatch(r"[a-z0-9_]{2,20}", game_key):
+        await message.answer("⚠️ КЛЮЧ: 2–20 символов, только маленькая латиница, цифры и «_».")
+        return
+
+    if game_key in GAMES:
+        await message.answer(f"⚠️ Категория с ключом «{esc(game_key)}» уже существует: «{esc(GAMES[game_key][0])}».")
+        return
+
+    candidate_emoji = parts[1]
+    # Если 2-й аргумент короткий эмодзи/символ и есть еще слова названия:
+    if len(parts) >= 3 and (len(candidate_emoji) <= 4 and not candidate_emoji.isalnum()):
+        emoji = candidate_emoji
+        title = " ".join(parts[2:]).strip()
+    else:
+        emoji = "🎮"
+        title = " ".join(parts[1:]).strip()
+
+    if not (1 <= len(title) <= 35):
+        await message.answer("⚠️ Название категории: от 1 до 35 символов.")
+        return
+
+    button_text = f"{emoji} {title}"
+    reserved = set(GAME_BUTTONS) | {
+        tx("btn_back"), tx("btn_home"), tx("btn_games"), tx("btn_instruction"),
+        tx("btn_support"), tx("btn_orders"), tx("btn_reviews"), tx("btn_news")
+    }
+    if button_text in reserved or title in reserved:
+        await message.answer("⚠️ Название совпадает с уже существующей кнопкой меню или другой игры.")
+        return
+
+    try:
+        await db.execute(
+            """INSERT INTO games (game_key, title, emoji, sort_order, active)
+               VALUES (?, ?, ?, (SELECT COALESCE(MAX(sort_order), 0) + 1 FROM games), 1)""",
+            (game_key, title, emoji),
+        )
+        await db.commit()
+        await load_games()
+    except sqlite3.IntegrityError:
+        await message.answer(f"⚠️ Игра с ключом «{esc(game_key)}» уже есть в базе данных.")
+        return
+
+    await message.answer(
+        f"✅ Категория <b>{emoji} {esc(title)}</b> успешно создана (ключ <code>{game_key}</code>)!\n\n"
+        f"Пользователи уже видят кнопку в каталоге игр.\n\n"
+        f"<b>Следующие шаги:</b>\n"
+        f"1. Добавить подкатегорию (валюта/донат):\n"
+        f"<code>/addsubcat {game_key} donate 💎 Донат</code>\n"
+        f"2. Добавить товар:\n"
+        f"<code>/addproduct {game_key} donate Название 50</code>\n"
+        f"3. Установить картинку-обложку (опционально):\n"
+        f"Отправьте фото с подписью <code>/setimage {game_key}</code>"
+    )
+
+
+@admin_router.message(Command("categories", "games"))
+async def adm_categories(message: Message):
+    async with db.execute(
+        """SELECT g.game_key, g.title, g.emoji, g.active,
+                  (SELECT COUNT(*) FROM subcategories s WHERE s.game_key=g.game_key),
+                  (SELECT COUNT(*) FROM products p WHERE p.game_key=g.game_key AND p.active=1)
+           FROM games g
+           ORDER BY g.sort_order, g.title"""
+    ) as cur:
+        rows = await cur.fetchall()
+
+    if not rows:
+        await message.answer("Категорий игр не найдено. Создать: /addcategory")
+        return
+
+    lines = ["<b>Категории игр (каталог доната):</b>\n"]
+    for game_key, title, emoji, active, sub_cnt, prod_cnt in rows:
+        status = "🟢" if active else "⚫"
+        has_img = " 🖼" if find_image([game_key]) else ""
+        lines.append(
+            f"{status} {emoji} <b>{esc(title)}</b> (<code>{esc(game_key)}</code>){has_img}\n"
+            f"   └ Подкатегорий: {sub_cnt} | Активных товаров: {prod_cnt}"
+        )
+
+    footer = (
+        "\n🟢 — активна, ⚫ — скрыта из меню.\n"
+        "• Добавить: <code>/addcategory КЛЮЧ [ЭМОДЗИ] Название</code>\n"
+        "• Скрыть/показать: <code>/togglecategory КЛЮЧ</code>\n"
+        "• Удалить: <code>/delcategory КЛЮЧ</code>"
+    )
+    await answer_chunked(message, lines, footer)
+
+
+@admin_router.message(Command("togglecategory", "togglegame"))
+async def adm_togglecategory(message: Message, command: CommandObject):
+    key = (command.args or "").strip().lower()
+    if not key:
+        await message.answer("Формат: /togglecategory КЛЮЧ\nПример: /togglecategory pubg")
+        return
+    async with db.execute("SELECT title, active FROM games WHERE game_key=?", (key,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        await message.answer(f"⚠️ Категория «{esc(key)}» не найдена. Список: /categories")
+        return
+    new_active = 0 if row[1] else 1
+    await db.execute("UPDATE games SET active=? WHERE game_key=?", (new_active, key))
+    await db.commit()
+    await load_games()
+    state_str = "🟢 показана пользователям" if new_active else "⚫ скрыта из меню"
+    await message.answer(f"Категория «{esc(row[0])}» теперь {state_str}.")
+
+
+@admin_router.message(Command("delcategory", "delgame"))
+async def adm_delcategory(message: Message, command: CommandObject):
+    key = (command.args or "").strip().lower()
+    if not key:
+        await message.answer("Формат: /delcategory КЛЮЧ\nПример: /delcategory pubg")
+        return
+    async with db.execute("SELECT title FROM games WHERE game_key=?", (key,)) as cur:
+        row = await cur.fetchone()
+    if not row:
+        await message.answer(f"⚠️ Категория «{esc(key)}» не найдена. Список: /categories")
+        return
+
+    async with db.execute("SELECT COUNT(*) FROM products WHERE game_key=?", (key,)) as cur:
+        (prod_count,) = await cur.fetchone()
+    if prod_count > 0:
+        await message.answer(
+            f"⚠️ В категории «{esc(row[0])}» есть {prod_count} товаров!\n"
+            f"Чтобы скрыть категорию от пользователей без удаления товаров, используйте:\n"
+            f"<code>/togglecategory {esc(key)}</code>"
+        )
+        return
+
+    await db.execute("DELETE FROM subcategories WHERE game_key=?", (key,))
+    await db.execute("DELETE FROM games WHERE game_key=?", (key,))
+    await db.commit()
+    await load_games()
+    await message.answer(f"🗑 Категория «{esc(row[0])}» (<code>{esc(key)}</code>) удалена.")
+
+
 # ---------- Подкатегории ----------
 @admin_router.message(Command("addsubcat"))
 async def adm_addsubcat(message: Message, command: CommandObject):
@@ -2268,6 +2482,9 @@ async def setup_bot_commands(bot: Bot) -> None:
             [
                 BotCommand(command="pending", description="Заказы, ожидающие проверки"),
                 BotCommand(command="order", description="Показать заказ: номер"),
+                BotCommand(command="categories", description="Список категорий игр"),
+                BotCommand(command="addcategory", description="Добавить категорию: ключ [эмодзи] название"),
+                BotCommand(command="togglecategory", description="Скрыть/показать категорию игры: ключ"),
                 BotCommand(command="products", description="Список товаров и их ID"),
                 BotCommand(command="subcats", description="Список подкатегорий"),
                 BotCommand(command="addsubcat", description="Добавить подкатегорию: игра ключ название"),

@@ -17,6 +17,7 @@ import os
 import re
 import sqlite3
 import tempfile
+from contextvars import ContextVar
 from datetime import datetime, timedelta, timezone
 
 import aiosqlite
@@ -100,6 +101,8 @@ GAMES: dict[str, tuple[str, str]] = {
 GAME_ACTIVE: dict[str, int] = {k: 1 for k in GAMES}
 GAME_IS_OTHER: dict[str, int] = {k: 0 for k in GAMES}
 BOT_USERNAME: str = ""
+current_lang: ContextVar[str] = ContextVar("current_lang", default="ru")
+SUPPORTED_LANGUAGES = ("ru", "tg", "en")
 # Подписи кнопок игр на Reply-клавиатуре -> ключ игры
 GAME_BUTTONS: dict[str, str] = {f"{emoji} {title}": key for key, (title, emoji) in GAMES.items()}
 
@@ -230,15 +233,16 @@ FILE_HEADER = """\
 # (ключ, подсказка про подстановки, текст по умолчанию)
 DEFAULTS: list[tuple[str, str, str]] = [
     # ---- Кнопки (подписи) ----
-    ("btn_games", "Подписи кнопок. Новые подписи появятся у пользователей при следующем показе меню.", "🎮 Пополнить / Игры"),
-    ("btn_other_games", "Кнопка «Другие игры»", "✨ Другие игры"),
-    ("btn_back_to_games", "Кнопка возврата к списку главных игр", "◀️ К играм"),
-    ("btn_referrals", "Кнопка «Рефералы» в главном меню", "👥 Рефералы"),
-    ("btn_instruction", "", "📖 Инструкция"),
-    ("btn_support", "", "💬 Поддержка"),
-    ("btn_orders", "", "📦 Мои заказы"),
-    ("btn_home", "", "🏠 Главное меню"),
-    ("btn_back", "Кнопка «Назад» на каждом шаге каталога", "⬅️ Назад"),
+    ("btn_games", "Подписи кнопок. Новые подписи появятся у пользователей при следующем показе меню.", "🔹 🎮 Пополнить / Игры"),
+    ("btn_other_games", "Кнопка «Другие игры»", "🔹 ✨ Другие игры"),
+    ("btn_lang", "Кнопка выбора языка в меню", "🌐 Забон / Язык"),
+    ("btn_back_to_games", "Кнопка возврата к списку главных игр", "🔹 ◀️ К играм"),
+    ("btn_referrals", "Кнопка «Рефералы» в главном меню", "🔹 👥 Рефералы"),
+    ("btn_instruction", "", "🔹 📖 Инструкция"),
+    ("btn_support", "", "🔹 💬 Поддержка"),
+    ("btn_orders", "", "🔹 📦 Мои заказы"),
+    ("btn_home", "", "🔹 🏠 Главное меню"),
+    ("btn_back", "Кнопка «Назад» на каждом шаге каталога", "🔹 ⬅️ Назад"),
     ("btn_promo", "Кнопка под экраном оплаты", "🎟 Ввести промокод"),
     ("btn_paid", "Кнопка под экраном оплаты", "✅ Я оплатил (отправить чек)"),
     ("btn_cancel_order", "Кнопка под экраном оплаты", "🚫 Отменить заказ"),
@@ -253,6 +257,7 @@ DEFAULTS: list[tuple[str, str, str]] = [
      "с оплатой переводом на карту в сомони.\n\nВыберите действие в меню ниже 👇"),
     ("home", "", "🏠 Главное меню"),
     ("other_games_menu", "Раздел других игр", "✨ <b>Другие игры</b>\n\nВыберите игру из дополнительного каталога:"),
+    ("referrals_text", "Экран реферальной программы", "👥 <b>Реферальная программа</b>\n\nПриглашайте друзей в бота и получайте скидочные промокоды на донат!\n\n🎁 <b>Награда:</b> промокод на <b>{reward_desc}</b> за каждые <b>{threshold}</b> приглашённых друзей.\n\n📊 <b>Ваша статистика:</b>\n• Всего приглашено: <b>{invited}</b> чел.\n• До следующего промокода: <b>{remains}</b> чел.\n• Получено промокодов: <b>{rewards_count}</b>{reward_history}{status_note}\n\n🔗 <b>Ваша ссылка для приглашения:</b>\n<code>{link}</code>\n\n<i>Нажмите на ссылку выше, чтобы скопировать её и отправить друзьям!</i>"),
     ("games_menu", "", "🎮 Выберите игру на клавиатуре ниже 👇"),
     ("cancelled_action", "После команды /cancel", "Действие отменено."),
     ("instruction", "", "📖 <b>Как сделать заказ</b>\n\n"
@@ -362,10 +367,138 @@ DEFAULTS: list[tuple[str, str, str]] = [
 DEFAULT_TEXTS = {k: t for k, _, t in DEFAULTS}
 TEXT_HINTS = {k: h for k, h, _ in DEFAULTS}
 
-_texts: dict[str, str] = dict(DEFAULT_TEXTS)        # текущие тексты (файл + значения по умолчанию)
-_text_meta: dict[str, str | None] = {}              # ключ -> директива @image (None — не задана)
+DEFAULT_TEXTS_TG: dict[str, str] = {
+    "btn_games": "🔹 🎮 Пур кардан / Бозиҳо",
+    "btn_other_games": "🔹 ✨ Бозиҳои дигар",
+    "btn_back_to_games": "🔹 ◀️ Ба бозиҳо",
+    "btn_referrals": "🔹 👥 Рефералҳо",
+    "btn_lang": "🌐 Забон / Язык",
+    "btn_instruction": "🔹 📖 Дастурамал",
+    "btn_support": "🔹 💬 Дастгирӣ",
+    "btn_orders": "🔹 📦 Фармоишҳои ман",
+    "btn_home": "🔹 🏠 Менюи асосӣ",
+    "btn_back": "🔹 ⬅️ Ба қафо",
+    "btn_promo": "🎟 Ворид кардани промокод",
+    "btn_paid": "💎 Ман пардохт кардам (фиристодани чек)",
+    "btn_cancel_order": "🚫 Бекор кардани фармоиш",
+    "btn_resume": "💳 Идомаи фармоиши №{order_id}",
+    "btn_write_support": "✍️ Навиштан ба дастгирӣ",
+    "placeholder_menu": "Амалиётро интихоб кунед 👇",
+    "placeholder_games": "Бозиро интихоб кунед 👇",
+    "placeholder_subcats": "Категорияро интихоб кунед 👇",
+    "welcome": "👋 <b>Ба мағозаи асъори бозиҳо хуш омадед!</b>\n\nДар ин ҷо шумо метавонед зуд ва бехатар ҳисоби <b>PUBG Mobile, Free Fire, Roblox ва дигар бозиҳоро</b> бо пардохти корт дар сомонӣ (TJS) пур кунед.\n\nАмалиёти дилхоҳро аз менюи поён интихоб кунед 👇",
+    "home": "🏠 <b>Менюи асосӣ:</b>",
+    "games_menu": "🎮 <b>Бозиро аз менюи поён интихоб кунед 👇</b>",
+    "other_games_menu": "✨ <b>Бозиҳои дигар</b>\n\nБозиро аз каталоги иловагӣ интихоб кунед:",
+    "cancelled_action": "Амалиёт бекор карда шуд.",
+    "instruction": "📖 <b>Тарзи фармоиш додан</b>\n\n1. «Пур кардан / Бозиҳо»-ро пахш карда, бозиро интихоб кунед.\n2. Категория ва бастаи лозимаро интихоб намоед.\n3. Player ID (UID)-и худро фиристед — онро бодиққат санҷед!\n4. Маблағи нишондодашударо ба корти мо (Dushanbe City ё Alif) гузаронед.\n5. «Ман пардохт кардам»-ро пахш карда, чекро фиристед.\n6. Пас аз тафтиш оператор супоришро иҷро мекунад ва ба шумо паём меояд.\n\n⏱ Одатан фармоиш дар давоми чанд дақиқа иҷро мешавад.",
+    "support": "💬 <b>Маркази дастгирӣ</b>\n\nБарои ҳама гуна саволҳо нависед: {support}\nЛутфан рақами фармоишро фаромӯш накунед.",
+    "subcats_menu": "{emoji} <b>{game}</b>\nКатегорияро аз менюи поён интихоб кунед 👇",
+    "packages_sub": "{emoji} <b>{game}</b> › {subcat}\nБастаи лозимаро интихоб кунед:",
+    "no_packages": "Дар ин бахш ҳоло мол вуҷуд надорад.",
+    "package_unavailable": "Баста дастнорас аст",
+    "package_gone": "Баста дигар дастнорас аст. Аз нав оғоз кунед.",
+    "manual": "🛠 Моли категорияи <b>{game}</b> муваққатан тавассути дастгирӣ расмӣ карда мешавад.\n\nТугмаи поёнро пахш кунед ва ба мо нависед.",
+    "manual_product": "📞 Моли <b>{title}</b> муваққатан тавассути дастгирӣ расмӣ карда мешавад.\n\nТугмаи поёнро пахш кунед ва ба мо нависед.",
+    "ask_player_id": "🎮 <b>{title}</b>\nНарх: <b>{price} TJS</b>\n\n🆔 <b>Player ID (UID)</b>-и худро барои пур кардан ворид намоед:\n{hint}",
+    "ask_player_id_invalid": "⚠️ Player ID нодуруст ворид карда шуд. Бори дигар фиристед:",
+    "order_created": "✅ Фармоиш №{order_id} қабул шуд!",
+    "payment_info": "💳 <b>Пардохти фармоиши №{order_id}</b>\n\n🎮 Мол: <b>{title}</b>\n🆔 Истифодабаранда: <code>{player_id}</code>\n💵 Маблағи пардохт: <b>{price} TJS</b>{promo_line}\n\nРеквизитҳои пардохт:\n<b>{requisites}</b>\n\nПас аз пардохт тугмаи «Ман пардохт кардам»-ро пахш намоед ва чекро фиристед.",
+    "payment_promo_line": "\n\n🎟 Промокод <b>{code}</b> қабул шуд (тахфиф {discount} TJS).",
+    "ask_receipt": "📸 Лутфан акс ё скриншоти чеки пардохтро фиристед (PDF низ қабул мешавад):",
+    "receipt_received": "✅ Чек қабул шуд ва ба оператор фиристода шуд! Интизор шавед, мо супоришро месанҷем.",
+    "order_done": "🎉 <b>Табрик! Фармоиши №{order_id} иҷро шуд!</b>\n\nАсъор ба ҳисоби шумо гузаронида шуд. Ташаккур барои харид!",
+    "order_rejected": "❌ <b>Фармоиши №{order_id} рад карда шуд.</b>\n\n<b>Сабаб:</b> {reason}\n\nАгар ин хато бошад, ба дастгирӣ нависед: {support}",
+    "order_cancelled_by_user": "Фармоиши №{order_id} бекор карда шуд.",
+    "maintenance": "🛠 Корҳои техникӣ рафта истодаанд. Лутфан дертар кӯшиш кунед!",
+    "banned": "🚫 Дастрасӣ маҳдуд карда шудааст. Ба дастгирӣ муроҷиат намоед: {support}",
+    "promo_applied": "✅ Промокод қабул шуд! Тахфиф: {discount} TJS.",
+    "promo_used": "⚠️ Шумо ин промокодро аллакай истифода кардаед.",
+    "promo_not_found": "⚠️ Промокод ёфт нашуд ё мӯҳлаташ гузаштааст.",
+    "promo_exhausted": "⚠️ Ин промокод аллакай тамом шудааст.",
+    "referrals_text": "👥 <b>Барномаи рефералӣ</b>\n\nДӯстонатонро ба бот даъват намоед ва промокодҳои тахфифӣ барои донат гиред!\n\n🎁 <b>Мукофот:</b> промокод ба маблағи <b>{reward_desc}</b> барои ҳар <b>{threshold}</b> дӯсти даъватшуда.\n\n📊 <b>Омори шумо:</b>\n• Дӯстони даъватшуда: <b>{invited}</b> нафар\n• То промокоди навбатӣ: <b>{remains}</b> нафар\n• Промокодҳои гирифташуда: <b>{rewards_count}</b>{reward_history}{status_note}\n\n🔗 <b>Пайванди шахсии шумо барои даъват:</b>\n<code>{link}</code>\n\n<i>Пайвандро пахш карда нусхабардорӣ намоед ва ба дӯстонатон фиристед!</i>",
+}
+
+DEFAULT_TEXTS_EN: dict[str, str] = {
+    "btn_games": "🔹 🎮 Top-up / Games",
+    "btn_other_games": "🔹 ✨ Other Games",
+    "btn_back_to_games": "🔹 ◀️ Back to Games",
+    "btn_referrals": "🔹 👥 Referrals",
+    "btn_lang": "🌐 Language / Забон",
+    "btn_instruction": "🔹 📖 Instructions",
+    "btn_support": "🔹 💬 Support",
+    "btn_orders": "🔹 📦 My Orders",
+    "btn_home": "🔹 🏠 Main Menu",
+    "btn_back": "🔹 ⬅️ Back",
+    "btn_promo": "🎟 Enter Promo Code",
+    "btn_paid": "💎 I have paid (send receipt)",
+    "btn_cancel_order": "🚫 Cancel Order",
+    "btn_resume": "💳 Resume Order #{order_id}",
+    "btn_write_support": "✍️ Contact Support",
+    "placeholder_menu": "Select an option 👇",
+    "placeholder_games": "Select a game 👇",
+    "placeholder_subcats": "Select a category 👇",
+    "welcome": "👋 <b>Welcome to the game currency shop!</b>\n\nHere you can quickly and securely top up <b>PUBG Mobile, Free Fire, Roblox, and more</b> with local card payment in somoni (TJS).\n\nChoose an action in the menu below 👇",
+    "home": "🏠 <b>Main Menu:</b>",
+    "games_menu": "🎮 <b>Select a game below 👇</b>",
+    "other_games_menu": "✨ <b>Other Games</b>\n\nSelect a game from the secondary catalog:",
+    "cancelled_action": "Action cancelled.",
+    "instruction": "📖 <b>How to place an order</b>\n\n1. Click «Top-up / Games» and choose your game.\n2. Choose a category and package.\n3. Send your Player ID (UID) — double-check it!\n4. Transfer the exact amount to the specified card (Dushanbe City or Alif).\n5. Click «I have paid» and send a screenshot of the receipt.\n6. After verification, operator delivers your order.\n\n⏱ Orders are usually completed within minutes.",
+    "support": "💬 <b>Support Center</b>\n\nFor any questions, message: {support}\nPlease include your order number.",
+    "subcats_menu": "{emoji} <b>{game}</b>\nSelect category below 👇",
+    "packages_sub": "{emoji} <b>{game}</b> › {subcat}\nSelect package:",
+    "no_packages": "There are currently no items in this category.",
+    "package_unavailable": "Package unavailable",
+    "package_gone": "Package is no longer available. Please start over.",
+    "manual": "🛠 Items for <b>{game}</b> are currently processed manually via support.\n\nClick the button below to message us.",
+    "manual_product": "📞 Item <b>{title}</b> is currently processed via support.\n\nClick the button below to message us.",
+    "ask_player_id": "🎮 <b>{title}</b>\nPrice: <b>{price} TJS</b>\n\n🆔 Enter your <b>Player ID (UID)</b>:\n{hint}",
+    "ask_player_id_invalid": "⚠️ Invalid Player ID. Please send again:",
+    "order_created": "✅ Order #{order_id} received!",
+    "payment_info": "💳 <b>Payment for Order #{order_id}</b>\n\n🎮 Item: <b>{title}</b>\n🆔 Player ID: <code>{player_id}</code>\n💵 Total: <b>{price} TJS</b>{promo_line}\n\nPayment details:\n<b>{requisites}</b>\n\nAfter payment, click «I have paid» and send your receipt screenshot.",
+    "payment_promo_line": "\n\n🎟 Promo code <b>{code}</b> applied ({discount} TJS discount).",
+    "ask_receipt": "📸 Please send a photo or screenshot of the payment receipt (PDF accepted):",
+    "receipt_received": "✅ Receipt received and sent to operator! Please wait while we verify it.",
+    "order_done": "🎉 <b>Congratulations! Order #{order_id} is completed!</b>\n\nCurrency has been credited to your account. Thank you for your purchase!",
+    "order_rejected": "❌ <b>Order #{order_id} was rejected.</b>\n\n<b>Reason:</b> {reason}\n\nIf this is an error, contact support: {support}",
+    "order_cancelled_by_user": "Order #{order_id} was cancelled.",
+    "maintenance": "🛠 Technical maintenance is underway. Please try again later!",
+    "banned": "🚫 Access restricted. Please contact support: {support}",
+    "promo_applied": "✅ Promo code applied! Discount: {discount} TJS.",
+    "promo_used": "⚠️ You have already used this promo code.",
+    "promo_not_found": "⚠️ Promo code not found or expired.",
+    "promo_exhausted": "⚠️ This promo code is already exhausted.",
+    "referrals_text": "👥 <b>Referral Program</b>\n\nInvite friends and earn discount promo codes for game donations!\n\n🎁 <b>Reward:</b> promo code for <b>{reward_desc}</b> for every <b>{threshold}</b> friends invited.\n\n📊 <b>Your Statistics:</b>\n• Total invited: <b>{invited}</b> friends\n• Until next promo code: <b>{remains}</b> friends\n• Promo codes received: <b>{rewards_count}</b>{reward_history}{status_note}\n\n🔗 <b>Your referral link:</b>\n<code>{link}</code>\n\n<i>Click the link above to copy and share with friends!</i>",
+}
+
+DEFAULT_TEXTS_BY_LANG: dict[str, dict[str, str]] = {
+    "ru": DEFAULT_TEXTS,
+    "tg": DEFAULT_TEXTS_TG,
+    "en": DEFAULT_TEXTS_EN,
+}
+
+_OLD_LABELS: dict[str, set[str]] = {
+    "btn_games": {"🎮 Пополнить / Игры", "🎮 Игры", "🔹 🎮 Пополнить / Игры"},
+    "btn_other_games": {"✨ Другие игры", "🔹 ✨ Другие игры"},
+    "btn_back_to_games": {"◀️ К играм", "🔹 ◀️ К играм"},
+    "btn_referrals": {"👥 Рефералы", "🔹 👥 Рефералы"},
+    "btn_instruction": {"📖 Инструкция", "🔹 📖 Инструкция"},
+    "btn_support": {"💬 Поддержка", "🔹 💬 Поддержка"},
+    "btn_orders": {"📦 Мои заказы", "🔹 📦 Мои заказы"},
+    "btn_home": {"🏠 Главное меню", "🔹 🏠 Главное меню"},
+    "btn_back": {"⬅️ Назад", "🔹 ⬅️ Назад"},
+    "btn_paid": {"✅ Я оплатил (отправить чек)", "💎 Я оплатил (отправить чек)"},
+}
+_texts_by_lang: dict[str, dict[str, str]] = {
+    "ru": dict(DEFAULT_TEXTS),
+    "tg": dict(DEFAULT_TEXTS_TG),
+    "en": dict(DEFAULT_TEXTS_EN),
+}
+_text_meta_by_lang: dict[str, dict[str, str | None]] = {"ru": {}, "tg": {}, "en": {}}
+_texts: dict[str, str] = _texts_by_lang["ru"]       # совместимость
+_text_meta: dict[str, str | None] = _text_meta_by_lang["ru"]
 _label_history: dict[str, set[str]] = {}            # старые подписи кнопок, чтобы они не «ломались» после правки
-HEADER_RE = re.compile(r"^===\s*([A-Za-z0-9_]+)\s*===\s*$")
+HEADER_RE = re.compile(r"^===\s*([A-Za-z0-9_:]+)\s*===\s*$")
 
 
 class _SafeDict(dict):
@@ -374,13 +507,38 @@ class _SafeDict(dict):
         return "{" + key + "}"
 
 
-def tx(key: str, **fmt) -> str:
-    """Возвращает текст по ключу с подстановками."""
-    text = _texts.get(key) or DEFAULT_TEXTS.get(key, key)
+def tx(key: str, lang: str | None = None, **fmt) -> str:
+    """Возвращает текст по ключу с подстановками для выбранного языка (ru/tg/en)."""
+    target_lang = lang or current_lang.get() or "ru"
+    if target_lang not in SUPPORTED_LANGUAGES:
+        target_lang = "ru"
+
+    text = _texts_by_lang.get(target_lang, {}).get(key)
+    if text is None:
+        text = DEFAULT_TEXTS_BY_LANG.get(target_lang, {}).get(key)
+    if text is None:
+        text = _texts_by_lang.get("ru", {}).get(key)
+    if text is None:
+        text = DEFAULT_TEXTS.get(key, key)
+
     try:
         return text.format_map(_SafeDict(fmt))
     except (ValueError, IndexError, KeyError, AttributeError):
-        return text  # в тексте кривые фигурные скобки — отправляем как есть
+        return text
+
+
+def get_all_button_labels(key: str) -> set[str]:
+    """Возвращает все возможные подписи кнопки на всех языках для фильтра."""
+    labels: set[str] = set()
+    for l in SUPPORTED_LANGUAGES:
+        val = tx(key, lang=l)
+        if val:
+            labels.add(val)
+        def_val = DEFAULT_TEXTS_BY_LANG.get(l, {}).get(key)
+        if def_val:
+            labels.add(def_val)
+    labels.update(_OLD_LABELS.get(key, set()))
+    return labels
 
 
 def _render_sections(items) -> str:
@@ -397,14 +555,16 @@ def write_default_texts_file() -> None:
         f.write(FILE_HEADER + "\n" + _render_sections(DEFAULTS))
 
 
-def parse_texts(raw: str) -> tuple[dict[str, str], dict[str, str | None]]:
-    texts: dict[str, str] = {}
-    meta: dict[str, str | None] = {}
-    key: str | None = None
+def parse_texts_multi(raw: str) -> tuple[dict[str, dict[str, str]], dict[str, dict[str, str | None]]]:
+    by_lang: dict[str, dict[str, str]] = {l: dict(DEFAULT_TEXTS_BY_LANG.get(l, {})) for l in SUPPORTED_LANGUAGES}
+    meta_by_lang: dict[str, dict[str, str | None]] = {l: {} for l in SUPPORTED_LANGUAGES}
+    cur_key: str | None = None
+    cur_lang: str = "ru"
     buf: list[str] = []
 
     def finish():
-        if key is None:
+        nonlocal cur_key, cur_lang, buf
+        if cur_key is None:
             return
         lines = list(buf)
         while lines and not lines[0].strip():
@@ -412,30 +572,71 @@ def parse_texts(raw: str) -> tuple[dict[str, str], dict[str, str | None]]:
         image = None
         if lines and lines[0].strip().lower().startswith("@image:"):
             image = lines.pop(0).split(":", 1)[1].strip() or None
-        texts[key] = "\n".join(lines).strip("\n").rstrip()
-        meta[key] = image
+        text_val = "\n".join(lines).strip("\n").rstrip()
+        by_lang.setdefault(cur_lang, {})[cur_key] = text_val
+        meta_by_lang.setdefault(cur_lang, {})[cur_key] = image
+        buf = []
 
     for line in raw.splitlines():
         m = HEADER_RE.match(line)
         if m:
             finish()
-            key, buf = m.group(1).lower(), []
+            raw_k = m.group(1).lower()
+            if ":" in raw_k:
+                k, l = raw_k.split(":", 1)
+                cur_key = k
+                cur_lang = l if l in SUPPORTED_LANGUAGES else "ru"
+            elif raw_k.endswith("_tg"):
+                cur_key = raw_k[:-3]
+                cur_lang = "tg"
+            elif raw_k.endswith("_en"):
+                cur_key = raw_k[:-3]
+                cur_lang = "en"
+            elif raw_k.endswith("_ru"):
+                cur_key = raw_k[:-3]
+                cur_lang = "ru"
+            else:
+                cur_key = raw_k
+                cur_lang = "ru"
             continue
-        if key is None:
-            continue                      # всё до первого заголовка — комментарии
+        if cur_key is None:
+            continue
         if line.startswith("# ") or line == "#":
-            continue                      # строка-комментарий
+            continue
         buf.append(line)
     finish()
-    return texts, meta
+    return by_lang, meta_by_lang
+
+
+def write_default_texts_file() -> None:
+    parts = [FILE_HEADER]
+    parts.append("\n# ============================================================")
+    parts.append("# РУССКИЙ ЯЗЫК (RU) — Язык по умолчанию")
+    parts.append("# ============================================================\n")
+    parts.append(_render_sections(DEFAULTS))
+
+    parts.append("\n# ============================================================")
+    parts.append("# ТОҶИКӢ (TG) — ЗАБОНИ ТОҶИКӢ")
+    parts.append("# Блокҳои === калид:tg === матни тоҷикиро муайян мекунанд")
+    parts.append("# ============================================================\n")
+    for key, text in DEFAULT_TEXTS_TG.items():
+        parts.append(f"=== {key}:tg ===\n{text}\n")
+
+    parts.append("\n# ============================================================")
+    parts.append("# ENGLISH (EN) — ENGLISH LANGUAGE")
+    parts.append("# Sections === key:en === override text for English language")
+    parts.append("# ============================================================\n")
+    for key, text in DEFAULT_TEXTS_EN.items():
+        parts.append(f"=== {key}:en ===\n{text}\n")
+
+    with open(TEXTS_FILE, "w", encoding="utf-8") as f:
+        f.write("\n".join(parts))
 
 
 def load_texts() -> list[str]:
-    """(Пере)читывает texts.txt. Возвращает список замечаний для админа."""
-    global _texts, _text_meta
+    """(Пере)читывает texts.txt для всех языков (ru, tg, en)."""
+    global _texts_by_lang, _text_meta_by_lang, _texts, _text_meta
     problems: list[str] = []
-    texts = dict(DEFAULT_TEXTS)
-    meta: dict[str, str | None] = {}
 
     if not os.path.isfile(TEXTS_FILE):
         try:
@@ -445,38 +646,23 @@ def load_texts() -> list[str]:
             problems.append(f"Не удалось создать {os.path.basename(TEXTS_FILE)}: {e}")
     else:
         try:
-            with open(TEXTS_FILE, encoding="utf-8-sig") as f:  # utf-8-sig — терпит BOM от Блокнота
+            with open(TEXTS_FILE, encoding="utf-8-sig") as f:
                 raw = f.read()
         except OSError as e:
             problems.append(f"Не удалось прочитать {os.path.basename(TEXTS_FILE)}: {e}")
         else:
-            parsed, parsed_meta = parse_texts(raw)
-            for key, text in parsed.items():
-                if not text:
-                    problems.append(f"«{key}»: пустой текст — используется стандартный")
-                    continue
-                default = DEFAULT_TEXTS.get(key)
-                if default is not None:
-                    unknown = set(re.findall(r"\{(\w+)\}", text)) - set(re.findall(r"\{(\w+)\}", default))
-                    if unknown:
-                        problems.append(f"«{key}»: неизвестные подстановки {', '.join('{' + u + '}' for u in sorted(unknown))}")
-                texts[key] = text
-            meta = parsed_meta
+            by_lang, meta_by_lang = parse_texts_multi(raw)
+            _texts_by_lang = by_lang
+            _text_meta_by_lang = meta_by_lang
+            _texts = _texts_by_lang.get("ru", {})
+            _text_meta = _text_meta_by_lang.get("ru", {})
 
-            # Новые тексты бота, которых ещё нет в вашем файле, дописываем в его конец — чтобы их можно было править
-            missing = [d for d in DEFAULTS if d[0] not in parsed]
-            if missing:
-                try:
-                    with open(TEXTS_FILE, "a", encoding="utf-8") as f:
-                        f.write("\n\n# === Добавлено автоматически: новые тексты бота ===\n\n" + _render_sections(missing))
-                    log.info("В %s дописаны новые тексты: %s", os.path.basename(TEXTS_FILE), ", ".join(d[0] for d in missing))
-                except OSError as e:
-                    problems.append(f"Не удалось дописать новые тексты в файл: {e}")
-
-    _texts, _text_meta = texts, meta
-    for key, value in _texts.items():
-        if key.startswith("btn_"):
-            _label_history.setdefault(key, set()).add(value)
+    for k, s in _OLD_LABELS.items():
+        _label_history.setdefault(k, set()).update(s)
+    for l in SUPPORTED_LANGUAGES:
+        for key, value in _texts_by_lang.get(l, {}).items():
+            if key.startswith("btn_"):
+                _label_history.setdefault(key, set()).add(value)
     return problems
 
 
@@ -605,7 +791,8 @@ async def init_db() -> None:
             full_name   TEXT,
             created_at  TEXT,
             banned      INTEGER NOT NULL DEFAULT 0,
-            referrer_id INTEGER
+            referrer_id INTEGER,
+            language    TEXT NOT NULL DEFAULT 'ru'
         );
         CREATE TABLE IF NOT EXISTS referrals (
             referrer_id INTEGER NOT NULL,
@@ -688,6 +875,8 @@ async def init_db() -> None:
         await db.execute("ALTER TABLE users ADD COLUMN referrer_id INTEGER")
     if not await _has_column("promocodes", "discount_type"):
         await db.execute("ALTER TABLE promocodes ADD COLUMN discount_type TEXT NOT NULL DEFAULT 'fixed'")
+    if not await _has_column("users", "language"):
+        await db.execute("ALTER TABLE users ADD COLUMN language TEXT NOT NULL DEFAULT 'ru'")
 
     # Подкатегории: при первом запуске создаём стандартные
     async with db.execute("SELECT COUNT(*) FROM subcategories") as cur:
@@ -755,19 +944,29 @@ async def upsert_user(message_or_cb, referrer_id: int | None = None) -> bool:
     """Создает/обновляет пользователя. Возвращает True, если пользователь зарегистрирован впервые."""
     u = message_or_cb.from_user
     is_new = False
-    async with db.execute("SELECT user_id FROM users WHERE user_id=?", (u.id,)) as cur:
+    async with db.execute("SELECT user_id, language FROM users WHERE user_id=?", (u.id,)) as cur:
         row = await cur.fetchone()
     if not row:
         is_new = True
+        detected_lang = "ru"
+        if getattr(u, "language_code", None):
+            code_l = u.language_code.lower()
+            if "tg" in code_l:
+                detected_lang = "tg"
+            elif "en" in code_l:
+                detected_lang = "en"
         await db.execute(
-            """INSERT INTO users (user_id, username, full_name, created_at, referrer_id) VALUES (?, ?, ?, ?, ?)""",
-            (u.id, u.username, u.full_name, now_iso(), referrer_id),
+            """INSERT INTO users (user_id, username, full_name, created_at, referrer_id, language) VALUES (?, ?, ?, ?, ?, ?)""",
+            (u.id, u.username, u.full_name, now_iso(), referrer_id, detected_lang),
         )
+        current_lang.set(detected_lang)
     else:
         await db.execute(
             """UPDATE users SET username=?, full_name=? WHERE user_id=?""",
             (u.username, u.full_name, u.id),
         )
+        if row[1]:
+            current_lang.set(row[1])
     await db.commit()
     return is_new
 
@@ -886,26 +1085,39 @@ def parse_price(raw: str) -> float | None:
 # ============================================================
 # КЛАВИАТУРЫ И ФИЛЬТРЫ КНОПОК
 # ============================================================
-def main_menu_kb() -> ReplyKeyboardMarkup:
-    """Главное меню: Reply-клавиатура внизу экрана."""
+def language_inline_kb() -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="🇷🇺 Русский", callback_data="setlang:ru"),
+                InlineKeyboardButton(text="🇹🇯 Тоҷикӣ", callback_data="setlang:tg"),
+                InlineKeyboardButton(text="🇬🇧 English", callback_data="setlang:en"),
+            ]
+        ]
+    )
+
+
+def main_menu_kb(lang: str | None = None) -> ReplyKeyboardMarkup:
+    """Главное меню: Reply-клавиатура внизу экрана с учетом выбранного языка."""
     kb = ReplyKeyboardBuilder()
-    kb.button(text=tx("btn_games"))
-    kb.button(text=tx("btn_instruction"))
-    kb.button(text=tx("btn_support"))
-    kb.button(text=tx("btn_orders"))
-    kb.button(text=tx("btn_referrals"))
+    kb.button(text=tx("btn_games", lang=lang))
+    kb.button(text=tx("btn_instruction", lang=lang))
+    kb.button(text=tx("btn_support", lang=lang))
+    kb.button(text=tx("btn_orders", lang=lang))
+    kb.button(text=tx("btn_referrals", lang=lang))
+    kb.button(text=tx("btn_lang", lang=lang))
     if REVIEWS_URL:
-        kb.button(text=tx("btn_reviews"))
+        kb.button(text=tx("btn_reviews", lang=lang))
     if NEWS_URL:
-        kb.button(text=tx("btn_news"))
+        kb.button(text=tx("btn_news", lang=lang))
     extra = (1 if REVIEWS_URL else 0) + (1 if NEWS_URL else 0)
-    adjust_args = [1, 2, 2]
+    adjust_args = [1, 2, 2, 1]
     if extra == 2:
         adjust_args.append(2)
     elif extra == 1:
         adjust_args.append(1)
     kb.adjust(*adjust_args)
-    return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_menu"))
+    return kb.as_markup(resize_keyboard=True, is_persistent=True, input_field_placeholder=tx("placeholder_menu", lang=lang))
 
 def games_kb() -> ReplyKeyboardMarkup:
     """Выбор игры: Reply-клавиатура главных игр + кнопка «Другие игры» (если есть) + «Главное меню»."""
@@ -960,15 +1172,19 @@ def kb_for(message: Message) -> ReplyKeyboardMarkup | None:
 
 
 class ButtonText(Filter):
-    """Срабатывает на нажатие Reply-кнопки. Подпись берётся из texts.txt;
-    старые подписи тоже узнаются — у пользователей клавиатура могла не обновиться."""
+    """Срабатывает на нажатие Reply-кнопки на любом поддерживаемом языке (RU, TG, EN)."""
     def __init__(self, key: str) -> None:
         self.key = key
 
     async def __call__(self, message: Message) -> bool:
         if not message.text:
             return False
-        return message.text == tx(self.key) or message.text in _label_history.get(self.key, ())
+        labels = get_all_button_labels(self.key)
+        return (
+            message.text == tx(self.key)
+            or message.text in labels
+            or message.text in _label_history.get(self.key, ())
+        )
 
 
 class GameButton(Filter):
@@ -1090,6 +1306,11 @@ class AccessMiddleware(BaseMiddleware):
         else:
             chat = getattr(event, "chat", None)
         user = getattr(event, "from_user", None)
+        if user is not None:
+            async with db.execute("SELECT language FROM users WHERE user_id=?", (user.id,)) as cur:
+                row_l = await cur.fetchone()
+            if row_l and row_l[0]:
+                current_lang.set(row_l[0])
 
         # Админ-чат и служебные события без пользователя пропускаем всегда
         if user is None or (chat is not None and chat.id == ADMIN_CHAT_ID):
@@ -1344,6 +1565,36 @@ async def menu_referrals(message: Message, state: FSMContext):
     await state.clear()
     await upsert_user(message)
     await show_referrals_screen(message)
+
+
+@router.message(PRIVATE, ButtonText("btn_lang"))
+@router.message(Command("lang", "language"))
+async def menu_language(message: Message, state: FSMContext):
+    await state.clear()
+    text = (
+        "🌐 <b>Интихоби забон / Выбор языка / Select Language</b>\n\n"
+        "Забони дилхоҳатонро интихоб кунед:\n"
+        "Выберите удобный язык интерфейса:\n"
+        "Choose your preferred interface language:"
+    )
+    await message.answer(text, reply_markup=language_inline_kb())
+
+
+@router.callback_query(F.data.startswith("setlang:"))
+async def cb_set_language(cb: CallbackQuery, state: FSMContext):
+    parts = cb.data.split(":", 1)
+    new_lang = parts[1] if len(parts) > 1 and parts[1] in SUPPORTED_LANGUAGES else "ru"
+    await db.execute("UPDATE users SET language=? WHERE user_id=?", (new_lang, cb.from_user.id))
+    await db.commit()
+    current_lang.set(new_lang)
+
+    notices = {
+        "ru": "✅ Язык успешно изменён на <b>Русский</b>!",
+        "tg": "✅ Забон бо муваффақият ба <b>Тоҷикӣ</b> иваз карда шуд!",
+        "en": "✅ Language successfully changed to <b>English</b>!",
+    }
+    await cb.answer()
+    await cb.message.answer(notices.get(new_lang, notices["ru"]), reply_markup=main_menu_kb(lang=new_lang))
 
 
 @router.message(PRIVATE, GameButton())
@@ -2848,7 +3099,11 @@ async def setup_bot_commands(bot: Bot) -> None:
     """Меню «/»: обычным пользователям — только /start, в админ-чате — полный список админ-команд."""
     try:
         await bot.set_my_commands(
-            [BotCommand(command="start", description="Главное меню")], scope=BotCommandScopeDefault()
+            [
+                BotCommand(command="start", description="Главное меню / Менюи асосӣ"),
+                BotCommand(command="lang", description="Выбор языка / Интихоби забон / Language"),
+            ],
+            scope=BotCommandScopeDefault()
         )
         await bot.set_my_commands(
             [

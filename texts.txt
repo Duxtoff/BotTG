@@ -343,3 +343,429 @@ Player ID (UID)
 === order_expired ===
 ⌛ Заказ №{order_id} не был оплачен в течение {hours} ч и автоматически отменён.
 Если вы всё ещё хотите пополнить аккаунт — оформите заказ заново.
+
+
+# ============================================================
+# ==== ТОҶИКӢ (TG) — ЗАБОНИ ТОҶИКӢ ====
+# Блокҳои === калид:tg === матни тоҷикиро муайян мекунанд.
+# Ҳар як матнро метавонед дар ин ҷо таҳрир кунед:
+# ============================================================
+
+=== btn_games:tg ===
+🔹 🎮 Пур кардан / Бозиҳо
+
+=== btn_other_games:tg ===
+🔹 ✨ Бозиҳои дигар
+
+=== btn_back_to_games:tg ===
+🔹 ◀️ Ба бозиҳо
+
+=== btn_referrals:tg ===
+🔹 👥 Рефералҳо
+
+=== btn_lang:tg ===
+🌐 Забон / Язык
+
+=== btn_instruction:tg ===
+🔹 📖 Дастурамал
+
+=== btn_support:tg ===
+🔹 💬 Дастгирӣ
+
+=== btn_orders:tg ===
+🔹 📦 Фармоишҳои ман
+
+=== btn_home:tg ===
+🔹 🏠 Менюи асосӣ
+
+=== btn_back:tg ===
+🔹 ⬅️ Ба қафо
+
+=== btn_promo:tg ===
+🎟 Ворид кардани промокод
+
+=== btn_paid:tg ===
+💎 Ман пардохт кардам (фиристодани чек)
+
+=== btn_cancel_order:tg ===
+🚫 Бекор кардани фармоиш
+
+=== btn_resume:tg ===
+💳 Идомаи фармоиши №{order_id}
+
+=== btn_write_support:tg ===
+✍️ Навиштан ба дастгирӣ
+
+=== placeholder_menu:tg ===
+Амалиётро интихоб кунед 👇
+
+=== placeholder_games:tg ===
+Бозиро интихоб кунед 👇
+
+=== placeholder_subcats:tg ===
+Категорияро интихоб кунед 👇
+
+=== welcome:tg ===
+👋 <b>Ба мағозаи асъори бозиҳо хуш омадед!</b>
+
+Дар ин ҷо шумо метавонед зуд ва бехатар ҳисоби <b>PUBG Mobile, Free Fire, Roblox ва дигар бозиҳоро</b> бо пардохти корт дар сомонӣ (TJS) пур кунед.
+
+Амалиёти дилхоҳро аз менюи поён интихоб кунед 👇
+
+=== home:tg ===
+🏠 <b>Менюи асосӣ:</b>
+
+=== games_menu:tg ===
+🎮 <b>Бозиро аз менюи поён интихоб кунед 👇</b>
+
+=== other_games_menu:tg ===
+✨ <b>Бозиҳои дигар</b>
+
+Бозиро аз каталоги иловагӣ интихоб кунед:
+
+=== cancelled_action:tg ===
+Амалиёт бекор карда шуд.
+
+=== instruction:tg ===
+📖 <b>Тарзи фармоиш додан</b>
+
+1. «Пур кардан / Бозиҳо»-ро пахш карда, бозиро интихоб кунед.
+2. Категория ва бастаи лозимаро интихоб намоед.
+3. Player ID (UID)-и худро фиристед — онро бодиққат санҷед!
+4. Маблағи нишондодашударо ба корти мо (Dushanbe City ё Alif) гузаронед.
+5. «Ман пардохт кардам»-ро пахш карда, чекро фиристед.
+6. Пас аз тафтиш оператор супоришро иҷро мекунад ва ба шумо паём меояд.
+
+⏱ Одатан фармоиш дар давоми чанд дақиқа иҷро мешавад.
+
+=== support:tg ===
+💬 <b>Маркази дастгирӣ</b>
+
+Барои ҳама гуна саволҳо нависед: {support}
+Лутфан рақами фармоишро фаромӯш накунед.
+
+=== subcats_menu:tg ===
+{emoji} <b>{game}</b>
+Категорияро аз менюи поён интихоб кунед 👇
+
+=== packages_sub:tg ===
+{emoji} <b>{game}</b> › {subcat}
+Бастаи лозимаро интихоб кунед:
+
+=== no_packages:tg ===
+Дар ин бахш ҳоло мол вуҷуд надорад.
+
+=== package_unavailable:tg ===
+Баста дастнорас аст
+
+=== package_gone:tg ===
+Баста дигар дастнорас аст. Аз нав оғоз кунед.
+
+=== manual:tg ===
+🛠 Моли категорияи <b>{game}</b> муваққатан тавассути дастгирӣ расмӣ карда мешавад.
+
+Тугмаи поёнро пахш кунед ва ба мо нависед.
+
+=== manual_product:tg ===
+📞 Моли <b>{title}</b> муваққатан тавассути дастгирӣ расмӣ карда мешавад.
+
+Тугмаи поёнро пахш кунед ва ба мо нависед.
+
+=== ask_player_id:tg ===
+🎮 <b>{title}</b>
+Нарх: <b>{price} TJS</b>
+
+🆔 <b>Player ID (UID)</b>-и худро барои пур кардан ворид намоед:
+{hint}
+
+=== ask_player_id_invalid:tg ===
+⚠️ Player ID нодуруст ворид карда шуд. Бори дигар фиристед:
+
+=== order_created:tg ===
+✅ Фармоиш №{order_id} қабул шуд!
+
+=== payment_info:tg ===
+💳 <b>Пардохти фармоиши №{order_id}</b>
+
+🎮 Мол: <b>{title}</b>
+🆔 Истифодабаранда: <code>{player_id}</code>
+💵 Маблағи пардохт: <b>{price} TJS</b>{promo_line}
+
+Реквизитҳои пардохт:
+<b>{requisites}</b>
+
+Пас аз пардохт тугмаи «Ман пардохт кардам»-ро пахш намоед ва чекро фиристед.
+
+=== payment_promo_line:tg ===
+
+
+🎟 Промокод <b>{code}</b> қабул шуд (тахфиф {discount} TJS).
+
+=== ask_receipt:tg ===
+📸 Лутфан акс ё скриншоти чеки пардохтро фиристед (PDF низ қабул мешавад):
+
+=== receipt_received:tg ===
+✅ Чек қабул шуд ва ба оператор фиристода шуд! Интизор шавед, мо супоришро месанҷем.
+
+=== order_done:tg ===
+🎉 <b>Табрик! Фармоиши №{order_id} иҷро шуд!</b>
+
+Асъор ба ҳисоби шумо гузаронида шуд. Ташаккур барои харид!
+
+=== order_rejected:tg ===
+❌ <b>Фармоиши №{order_id} рад карда шуд.</b>
+
+<b>Сабаб:</b> {reason}
+
+Агар ин хато бошад, ба дастгирӣ нависед: {support}
+
+=== order_cancelled_by_user:tg ===
+Фармоиши №{order_id} бекор карда шуд.
+
+=== maintenance:tg ===
+🛠 Корҳои техникӣ рафта истодаанд. Лутфан дертар кӯшиш кунед!
+
+=== banned:tg ===
+🚫 Дастрасӣ маҳдуд карда шудааст. Ба дастгирӣ муроҷиат намоед: {support}
+
+=== promo_applied:tg ===
+✅ Промокод қабул шуд! Тахфиф: {discount} TJS.
+
+=== promo_used:tg ===
+⚠️ Шумо ин промокодро аллакай истифода кардаед.
+
+=== promo_not_found:tg ===
+⚠️ Промокод ёфт нашуд ё мӯҳлаташ гузаштааст.
+
+=== promo_exhausted:tg ===
+⚠️ Ин промокод аллакай тамом шудааст.
+
+=== referrals_text:tg ===
+👥 <b>Барномаи рефералӣ</b>
+
+Дӯстонатонро ба бот даъват намоед ва промокодҳои тахфифӣ барои донат гиред!
+
+🎁 <b>Мукофот:</b> промокод ба маблағи <b>{reward_desc}</b> барои ҳар <b>{threshold}</b> дӯсти даъватшуда.
+
+📊 <b>Омори шумо:</b>
+• Дӯстони даъватшуда: <b>{invited}</b> нафар
+• То промокоди навбатӣ: <b>{remains}</b> нафар
+• Промокодҳои гирифташуда: <b>{rewards_count}</b>{reward_history}{status_note}
+
+🔗 <b>Пайванди шахсии шумо барои даъват:</b>
+<code>{link}</code>
+
+<i>Пайвандро пахш карда нусхабардорӣ намоед ва ба дӯстонатон фиристед!</i>
+
+
+# ============================================================
+# ==== ENGLISH (EN) — ENGLISH LANGUAGE ====
+# Sections === key:en === define English text.
+# You can freely edit any of these messages below:
+# ============================================================
+
+=== btn_games:en ===
+🔹 🎮 Top-up / Games
+
+=== btn_other_games:en ===
+🔹 ✨ Other Games
+
+=== btn_back_to_games:en ===
+🔹 ◀️ Back to Games
+
+=== btn_referrals:en ===
+🔹 👥 Referrals
+
+=== btn_lang:en ===
+🌐 Language / Забон
+
+=== btn_instruction:en ===
+🔹 📖 Instructions
+
+=== btn_support:en ===
+🔹 💬 Support
+
+=== btn_orders:en ===
+🔹 📦 My Orders
+
+=== btn_home:en ===
+🔹 🏠 Main Menu
+
+=== btn_back:en ===
+🔹 ⬅️ Back
+
+=== btn_promo:en ===
+🎟 Enter Promo Code
+
+=== btn_paid:en ===
+💎 I have paid (send receipt)
+
+=== btn_cancel_order:en ===
+🚫 Cancel Order
+
+=== btn_resume:en ===
+💳 Resume Order #{order_id}
+
+=== btn_write_support:en ===
+✍️ Contact Support
+
+=== placeholder_menu:en ===
+Select an option 👇
+
+=== placeholder_games:en ===
+Select a game 👇
+
+=== placeholder_subcats:en ===
+Select a category 👇
+
+=== welcome:en ===
+👋 <b>Welcome to the game currency shop!</b>
+
+Here you can quickly and securely top up <b>PUBG Mobile, Free Fire, Roblox, and more</b> with local card payment in somoni (TJS).
+
+Choose an action in the menu below 👇
+
+=== home:en ===
+🏠 <b>Main Menu:</b>
+
+=== games_menu:en ===
+🎮 <b>Select a game below 👇</b>
+
+=== other_games_menu:en ===
+✨ <b>Other Games</b>
+
+Select a game from the secondary catalog:
+
+=== cancelled_action:en ===
+Action cancelled.
+
+=== instruction:en ===
+📖 <b>How to place an order</b>
+
+1. Click «Top-up / Games» and choose your game.
+2. Choose a category and package.
+3. Send your Player ID (UID) — double-check it!
+4. Transfer the exact amount to the specified card (Dushanbe City or Alif).
+5. Click «I have paid» and send a screenshot of the receipt.
+6. After verification, operator delivers your order.
+
+⏱ Orders are usually completed within minutes.
+
+=== support:en ===
+💬 <b>Support Center</b>
+
+For any questions, message: {support}
+Please include your order number.
+
+=== subcats_menu:en ===
+{emoji} <b>{game}</b>
+Select category below 👇
+
+=== packages_sub:en ===
+{emoji} <b>{game}</b> › {subcat}
+Select package:
+
+=== no_packages:en ===
+There are currently no items in this category.
+
+=== package_unavailable:en ===
+Package unavailable
+
+=== package_gone:en ===
+Package is no longer available. Please start over.
+
+=== manual:en ===
+🛠 Items for <b>{game}</b> are currently processed manually via support.
+
+Click the button below to message us.
+
+=== manual_product:en ===
+📞 Item <b>{title}</b> is currently processed via support.
+
+Click the button below to message us.
+
+=== ask_player_id:en ===
+🎮 <b>{title}</b>
+Price: <b>{price} TJS</b>
+
+🆔 Enter your <b>Player ID (UID)</b>:
+{hint}
+
+=== ask_player_id_invalid:en ===
+⚠️ Invalid Player ID. Please send again:
+
+=== order_created:en ===
+✅ Order #{order_id} received!
+
+=== payment_info:en ===
+💳 <b>Payment for Order #{order_id}</b>
+
+🎮 Item: <b>{title}</b>
+🆔 Player ID: <code>{player_id}</code>
+💵 Total: <b>{price} TJS</b>{promo_line}
+
+Payment details:
+<b>{requisites}</b>
+
+After payment, click «I have paid» and send your receipt screenshot.
+
+=== payment_promo_line:en ===
+
+
+🎟 Promo code <b>{code}</b> applied ({discount} TJS discount).
+
+=== ask_receipt:en ===
+📸 Please send a photo or screenshot of the payment receipt (PDF accepted):
+
+=== receipt_received:en ===
+✅ Receipt received and sent to operator! Please wait while we verify it.
+
+=== order_done:en ===
+🎉 <b>Congratulations! Order #{order_id} is completed!</b>
+
+Currency has been credited to your account. Thank you for your purchase!
+
+=== order_rejected:en ===
+❌ <b>Order #{order_id} was rejected.</b>
+
+<b>Reason:</b> {reason}
+
+If this is an error, contact support: {support}
+
+=== order_cancelled_by_user:en ===
+Order #{order_id} was cancelled.
+
+=== maintenance:en ===
+🛠 Technical maintenance is underway. Please try again later!
+
+=== banned:en ===
+🚫 Access restricted. Please contact support: {support}
+
+=== promo_applied:en ===
+✅ Promo code applied! Discount: {discount} TJS.
+
+=== promo_used:en ===
+⚠️ You have already used this promo code.
+
+=== promo_not_found:en ===
+⚠️ Promo code not found or expired.
+
+=== promo_exhausted:en ===
+⚠️ This promo code is already exhausted.
+
+=== referrals_text:en ===
+👥 <b>Referral Program</b>
+
+Invite friends and earn discount promo codes for game donations!
+
+🎁 <b>Reward:</b> promo code for <b>{reward_desc}</b> for every <b>{threshold}</b> friends invited.
+
+📊 <b>Your Statistics:</b>
+• Total invited: <b>{invited}</b> friends
+• Until next promo code: <b>{remains}</b> friends
+• Promo codes received: <b>{rewards_count}</b>{reward_history}{status_note}
+
+🔗 <b>Your referral link:</b>
+<code>{link}</code>
+
+<i>Click the link above to copy and share with friends!</i>
